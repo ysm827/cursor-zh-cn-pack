@@ -282,6 +282,18 @@ export async function unapplyNlsMessagePatch(root: string, context: vscode.Exten
   };
 }
 
+export async function deleteNlsMessageBackup(backupPath: string, progress?: ProgressCallback): Promise<void> {
+  await reportProgress(progress, { message: '准备删除 NLS 备份文件', percent: 0 });
+  
+  try {
+    await fs.unlink(backupPath);
+    await reportProgress(progress, { message: 'NLS 备份文件已删除', percent: 100 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`删除 NLS 备份文件失败: ${message}`);
+  }
+}
+
 export async function restoreNlsMessageBackup(root: string, context: vscode.ExtensionContext, backupPath?: string, progress?: ProgressCallback): Promise<NlsMessagePatchRestoreResult> {
   const install = await validateCursorRoot(root, 'NLS 消息表备份恢复', createScopedProgress(progress, 0, 8, '校验安装目录'));
   if (!install.valid) {

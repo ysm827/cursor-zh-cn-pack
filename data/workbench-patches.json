@@ -4357,6 +4357,21 @@
     "target": "{menuId:Nt.MenubarHelpMenu,label:\"帮助\",trigger:\"text\"}"
   },
   {
+    "id": "workbench.glass.menubar.selection",
+    "source": "{menuId:Nt.MenubarSelectionMenu,label:\"Selection\",trigger:\"text\"}",
+    "target": "{menuId:Nt.MenubarSelectionMenu,label:\"选择\",trigger:\"text\"}"
+  },
+  {
+    "id": "workbench.glass.menubar.go",
+    "source": "{menuId:Nt.MenubarGoMenu,label:\"Go\",trigger:\"text\"}",
+    "target": "{menuId:Nt.MenubarGoMenu,label:\"转到\",trigger:\"text\"}"
+  },
+  {
+    "id": "workbench.glass.menubar.terminal",
+    "source": "{menuId:Nt.MenubarTerminalMenu,label:\"Terminal\",trigger:\"text\"}",
+    "target": "{menuId:Nt.MenubarTerminalMenu,label:\"终端\",trigger:\"text\"}"
+  },
+  {
     "id": "workbench.glass.file.new-agent",
     "source": "ka({id:wJg,title:\"New Agent\",icon:\"agent\",f1:!1,keybindingCategory:Qu.GENERAL,keybinding:{weight:bx,primary:2092},menu:{column:Nt.MenubarFileMenu,group:\"1_new\",order:0,title:\"New Agent\"}",
     "target": "ka({id:wJg,title:\"新建智能体\",icon:\"agent\",f1:!1,keybindingCategory:Qu.GENERAL,keybinding:{weight:bx,primary:2092},menu:{column:Nt.MenubarFileMenu,group:\"1_new\",order:0,title:\"新建智能体\"}"
@@ -4500,5 +4515,35 @@
     "id": "workbench.glass.terminal.new-terminal-title-v2",
     "source": "B(\"glass.terminal.treeNewTerminal\",\"New Terminal\")",
     "target": "B(\"glass.terminal.treeNewTerminal\",\"新建终端\")"
+  },
+  {
+    "id": "workbench.glass.agent-list.today",
+    "source": "n8y(t){const e=new Date(t||0),n=new Date,i=new Date(n);i.setDate(i.getDate()-1);const r=new Date(n.getTime()-10080*60*1e3);return e.toDateString()===n.toDateString()?\"Today\":e.toDateString()===i.toDateString()?\"Yesterday\":e>r?\"This week\":\"Older\"}",
+    "target": "n8y(t){const e=new Date(t||0),n=new Date,i=new Date(n);i.setDate(i.getDate()-1);const r=new Date(n.getTime()-10080*60*1e3);return e.toDateString()===n.toDateString()?\"今天\":e.toDateString()===i.toDateString()?\"昨天\":e>r?\"本周\":\"更早\"}"
+  },
+  {
+    "id": "workbench.glass.agent-status.thinking",
+    "source": "completedAction:u,completedDetails:d,isHeaderOnly:l,expandable:h||!l&&p,isThinking:!0}}",
+    "target": "completedAction:u,completedDetails:d,isHeaderOnly:l,expandable:h||!l&&p,isThinking:!0}}"
+  },
+  {
+    "id": "workbench.glass.agent-status.thought-text",
+    "source": "c=c||r&&o.length>0,u=c?o:\"Thought\",d=jKo({seconds:n,durationMs:t.thinkingDurationMs,parseHeaders:c,headerTitle:o})",
+    "target": "c=c||r&&o.length>0,u=c?o:\"思考\",d=jKo({seconds:n,durationMs:t.thinkingDurationMs,parseHeaders:c,headerTitle:o})"
+  },
+  {
+    "id": "workbench.glass.agent-status.planning-next-moves",
+    "source": "{loadingAction:\"Thinking\",completedAction:u,completedDetails:d,isHeaderOnly:l,expandable:h||!l&&p,isThinking:!0}}",
+    "target": "{loadingAction:\"正在思考\",completedAction:u,completedDetails:d,isHeaderOnly:l,expandable:h||!l&&p,isThinking:!0}}"
+  },
+  {
+    "id": "workbench.glass.agent-status.exploring-searches",
+    "source": "loadingAction:\"Running\",completedAction:\"Ran\",completedDetails:`${i} browser action${i===1?\"\":\"s\"}`,isHeaderOnly:!1,expandable:!0}}",
+    "target": "loadingAction:\"正在运行\",completedAction:\"已运行\",completedDetails:`${i} 个浏览器操作`,isHeaderOnly:!1,expandable:!0}}"
+  },
+  {
+    "id": "workbench.glass.agent-draft.draft-prefix",
+    "source": "n.isDraft?`Draft: ${n.composer.subtitle||\"\"}`:n.composer.name||\"New Agent\"",
+    "target": "n.isDraft?`草稿：${n.composer.subtitle||\"\"}`:n.composer.name||\"新建智能体\""
   }
 ]

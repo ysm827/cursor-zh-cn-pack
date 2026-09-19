@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { launchCursorRestartHelper, shutdownCursorProcesses } from './cursorProcessManager';
 import { CursorInstall, locateCursorInstall, validateCursorRoot } from './cursorLocator';
-import { applyNlsMessagePatch, NlsMessagePatchScanResult, restoreNlsMessageBackup, scanNlsMessagePatch, unapplyNlsMessagePatch } from './nlsMessagePatcher';
+import { applyNlsMessagePatch, deleteNlsMessageBackup, NlsMessagePatchScanResult, restoreNlsMessageBackup, scanNlsMessagePatch, unapplyNlsMessagePatch } from './nlsMessagePatcher';
 import { createScopedProgress, ProgressCallback, ProgressUpdate, reportProgress } from './progress';
 import { cleanLanguagePackCache, cleanRuntimeState, RuntimeStateScanResult, scanRuntimeState } from './runtimeStateCleaner';
-import { applyWorkbenchPatch, PatchBackupInfo, PatchScanResult, restoreWorkbenchBackup, scanWorkbenchPatch, unapplyWorkbenchPatch } from './workbenchPatcher';
+import { applyWorkbenchPatch, deleteWorkbenchBackup, PatchBackupInfo, PatchScanResult, restoreWorkbenchBackup, scanWorkbenchPatch, unapplyWorkbenchPatch } from './workbenchPatcher';
 
 interface ManagerProgressState extends ProgressUpdate {
   readonly operation: string;
@@ -22,7 +22,7 @@ interface ManagerState {
 }
 
 interface WebviewMessage {
-  readonly command: 'autoLocate' | 'chooseRoot' | 'rescan' | 'applyPatch' | 'cleanRuntimeState' | 'unapplyPatch' | 'restoreWorkbenchBackup' | 'restoreNlsBackup' | 'shutdownCursor' | 'restartCursor';
+  readonly command: 'autoLocate' | 'chooseRoot' | 'rescan' | 'applyPatch' | 'cleanRuntimeState' | 'unapplyPatch' | 'restoreWorkbenchBackup' | 'restoreNlsBackup' | 'deleteWorkbenchBackup' | 'deleteNlsBackup' | 'shutdownCursor' | 'restartCursor';
   readonly backupPath?: string;
 }
 
@@ -126,6 +126,12 @@ export class ManagerPanel {
           break;
         case 'restoreNlsBackup':
           await this.restoreNlsBackup(message.backupPath);
+          break;
+        case 'deleteWorkbenchBackup':
+          await this.deleteWorkbenchBackup(message.backupPath);
+          break;
+        case 'deleteNlsBackup':
+          await this.deleteNlsBackup(message.backupPath);
           break;
         case 'shutdownCursor':
           await this.shutdownCursor();
@@ -334,6 +340,46 @@ export class ManagerPanel {
     });
   }
 
+  private async deleteWorkbenchBackup(backupPath?: string): Promise<void> {
+    await this.runOperation('删除 Workbench 备份', async progress => {
+      const install = this.state.install;
+      if (!install?.valid) {
+        throw new Error('请先识别或选择有效的 Cursor 安装目录。');
+      }
+
+      if (!backupPath) {
+        throw new Error('未指定要删除的备份文件。');
+      }
+
+      await deleteWorkbenchBackup(backupPath, progress);
+      
+      // 重新扫描以更新备份列表
+      const patch = await scanWorkbenchPatch(install.root, this.context, progress);
+      this.updateState({ patch });
+      this.log(`Workbench 备份已删除: ${backupPath}`);
+    });
+  }
+
+  private async deleteNlsBackup(backupPath?: string): Promise<void> {
+    await this.runOperation('删除 NLS 消息表备份', async progress => {
+      const install = this.state.install;
+      if (!install?.valid) {
+        throw new Error('请先识别或选择有效的 Cursor 安装目录。');
+      }
+
+      if (!backupPath) {
+        throw new Error('未指定要删除的备份文件。');
+      }
+
+      await deleteNlsMessageBackup(backupPath, progress);
+      
+      // 重新扫描以更新备份列表
+      const nlsPatch = await scanNlsMessagePatch(install.root, this.context, progress);
+      this.updateState({ nlsPatch });
+      this.log(`NLS 消息表备份已删除: ${backupPath}`);
+    });
+  }
+
   private async shutdownCursor(): Promise<void> {
     const confirmed = await vscode.window.showWarningMessage(
       '将关闭当前识别到的 Cursor 安装对应的所有 Cursor.exe 进程。未保存的编辑器内容可能丢失，请先保存重要内容。',
@@ -438,7 +484,7 @@ export class ManagerPanel {
       return;
     }
 
-    this.panel.webview.html = getHtml(this.panel.webview, this.state);
+    this.panel.webview.html = getSimplifiedHtml(this.panel.webview, this.state);
   }
 }
 
@@ -1123,4 +1169,444 @@ function getNonce(): string {
     text += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return text;
+}
+
+function getSimplifiedHtml(webview: vscode.Webview, state: ManagerState): string {
+  const nonce = getNonce();
+  const cspSource = webview.cspSource;
+  const patch = state.patch;
+  const nlsPatch = state.nlsPatch;
+  const busyAttribute = state.progress ? ' disabled' : '';
+  
+  const patchStatusText: Record<string, string> = {
+    'not-applied': '未应用',
+    'applied': '已应用',
+    'partial': '部分应用',
+    'unknown': '未知'
+  };
+  
+  const overallStatusText = !state.install?.valid 
+    ? '未识别' 
+    : (patch?.state === 'applied' && nlsPatch?.state === 'applied')
+      ? '已应用'
+      : '待处理';
+  
+  const overallStatusClass = overallStatusText === '已应用' ? 'ok' : overallStatusText === '未识别' ? 'warn' : '';
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cursor 汉化管理器</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: var(--vscode-font-family); 
+      color: var(--vscode-foreground); 
+      background: var(--vscode-editor-background);
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    .header { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    h1 { font-size: 22px; font-weight: 600; }
+    h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+    .status-badge {
+      padding: 5px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+    }
+    .status-badge.ok { 
+      background: color-mix(in srgb, var(--vscode-testing-iconPassed) 20%, transparent); 
+      color: var(--vscode-testing-iconPassed);
+    }
+    .status-badge.warn { 
+      background: color-mix(in srgb, var(--vscode-testing-iconQueued) 20%, transparent); 
+      color: var(--vscode-testing-iconQueued);
+    }
+    .actions { 
+      display: flex; 
+      gap: 10px; 
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 7px 14px;
+      border: none;
+      border-radius: 4px;
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    button:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    button.secondary:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground); }
+    .section {
+      background: var(--vscode-editorWidget-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .directory-path, .info-detail {
+      font-family: var(--vscode-editor-font-family);
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+      word-break: break-all;
+      padding: 10px;
+      background: var(--vscode-editor-background);
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .info-item {
+      padding: 12px;
+      background: var(--vscode-editor-background);
+      border-radius: 4px;
+    }
+    .info-label {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .info-value {
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .log-content {
+      font-family: var(--vscode-editor-font-family);
+      font-size: 11px;
+      line-height: 1.7;
+      color: var(--vscode-descriptionForeground);
+      background: var(--vscode-editor-background);
+      border-radius: 4px;
+      padding: 12px;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+    .progress-section {
+      background: var(--vscode-editorWidget-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .progress-title { font-weight: 600; font-size: 14px; }
+    .progress-percent { color: var(--vscode-descriptionForeground); font-size: 13px; }
+    .progress-message { 
+      font-size: 12px; 
+      color: var(--vscode-descriptionForeground); 
+      margin-bottom: 12px;
+    }
+    .progress-bar {
+      height: 6px;
+      background: var(--vscode-editor-background);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--vscode-progressBar-background);
+      transition: width 0.3s ease;
+    }
+    dialog {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      margin: 0;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 8px;
+      padding: 0;
+      background: var(--vscode-editor-background);
+      color: var(--vscode-foreground);
+      min-width: 500px;
+      max-width: 650px;
+    }
+    dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+    .dialog-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .dialog-header h3 { font-size: 15px; font-weight: 600; }
+    .dialog-body { padding: 18px; }
+    .dialog-footer {
+      padding: 14px 18px;
+      border-top: 1px solid var(--vscode-panel-border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .backup-list { max-height: 350px; overflow-y: auto; }
+    .backup-item {
+      padding: 10px;
+      margin-bottom: 6px;
+      background: var(--vscode-editorWidget-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .backup-item:hover { background: var(--vscode-list-hoverBackground); }
+    .backup-item.selected { 
+      border-color: var(--vscode-focusBorder);
+      background: var(--vscode-list-activeSelectionBackground);
+    }
+    .backup-name { font-weight: 500; margin-bottom: 3px; }
+    .backup-detail { 
+      font-size: 11px; 
+      color: var(--vscode-descriptionForeground);
+      font-family: var(--vscode-editor-font-family);
+    }
+    .detail-toggle {
+      background: transparent !important;
+      color: var(--vscode-textLink-foreground);
+      text-decoration: underline;
+      padding: 0;
+      font-size: 12px;
+      cursor: pointer;
+      border: none;
+    }
+    .detail-toggle:hover:not(:disabled) {
+      background: transparent !important;
+      color: var(--vscode-textLink-activeForeground);
+      text-decoration: none;
+    }
+    .detail-toggle:disabled {
+      background: transparent !important;
+      color: var(--vscode-disabledForeground);
+      text-decoration: none;
+      cursor: default;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Cursor 汉化管理器</h1>
+      <span class="status-badge ${overallStatusClass}">${escapeHtml(overallStatusText)}</span>
+    </div>
+
+    ${state.progress ? `<div class="progress-section">
+      <div class="progress-header">
+        <div class="progress-title">${escapeHtml(state.progress.operation)}</div>
+        <div class="progress-percent">${state.progress.percent}%</div>
+      </div>
+      <div class="progress-message">${escapeHtml(state.progress.message)}</div>
+      <div class="progress-bar">
+        <div class="progress-fill" style="width: ${state.progress.percent}%"></div>
+      </div>
+    </div>` : ''}
+
+    <div class="actions">
+      <button data-command="applyPatch"${busyAttribute}>应用补丁</button>
+      <button data-command="unapplyPatch"${busyAttribute}>卸载补丁</button>
+      <button data-command="restartCursor"${busyAttribute}>重启 Cursor</button>
+      <button class="secondary" data-command="openBackupDialog"${busyAttribute}>管理备份</button>
+    </div>
+
+    <div class="section">
+      <h2>Cursor 安装目录</h2>
+      <div class="directory-path">${escapeHtml(state.cursorRoot ?? '未识别')}</div>
+      <div class="actions">
+        <button class="secondary" data-command="openDirectoryDialog"${busyAttribute}>选择目录</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h2 style="margin: 0;">状态信息</h2>
+        <button class="detail-toggle" id="detailToggleBtn" ${patch || nlsPatch ? '' : 'disabled'}>
+          ${patch || nlsPatch ? '查看详情' : '暂无详情'}
+        </button>
+      </div>
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="info-label">Workbench 补丁</div>
+          <div class="info-value">${patchStatusText[patch?.state ?? 'unknown']}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">NLS 补丁</div>
+          <div class="info-value">${patchStatusText[nlsPatch?.state ?? 'unknown']}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Cursor 版本</div>
+          <div class="info-value">${escapeHtml(state.install?.version ?? '未知')}</div>
+        </div>
+      </div>
+      <div id="detail-info" class="info-detail hidden">
+        ${patch ? `Workbench: 已汉化 ${patch.targetHits} / 待处理 ${patch.sourceHits} / 规则 ${patch.totalRules}<br>` : ''}
+        ${nlsPatch ? `NLS: 已汉化 ${nlsPatch.targetHits} / 待处理 ${nlsPatch.sourceHits} / 规则 ${nlsPatch.totalRules}<br>` : ''}
+        ${patch ? `Workbench 文件: ${escapeHtml(patch.filePath)}<br>` : ''}
+        ${nlsPatch ? `NLS 文件: ${escapeHtml(nlsPatch.filePath)}` : ''}
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>操作日志</h2>
+      <div class="log-content">
+        ${state.logs.length ? state.logs.map(escapeHtml).join('<br>') : '暂无日志'}
+      </div>
+    </div>
+  </div>
+
+  <dialog id="backupDialog">
+    <div class="dialog-header">
+      <h3>备份管理</h3>
+      <button class="secondary close-dialog-btn">✕</button>
+    </div>
+    <div class="dialog-body">
+      <h2>Workbench 备份</h2>
+      <div class="backup-list">
+        ${(patch?.backups ?? []).length === 0 ? '<div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground);">暂无备份</div>' : (patch?.backups ?? []).map(backup => `<div class="backup-item" data-path="${escapeHtml(backup.path)}" data-type="workbench">
+          <div class="backup-name">${escapeHtml(backup.name)}</div>
+          <div class="backup-detail">${backup.isOriginal ? '原始备份' : backup.kind === 'before-restore' ? '恢复前快照' : '卸载前快照'} · ${patchStatusText[backup.status.state] ?? backup.status.state}</div>
+        </div>`).join('')}
+      </div>
+      <h2 style="margin-top: 20px;">NLS 备份</h2>
+      <div class="backup-list">
+        ${(nlsPatch?.backups ?? []).length === 0 ? '<div style="padding: 20px; text-align: center; color: var(--vscode-descriptionForeground);">暂无备份</div>' : (nlsPatch?.backups ?? []).map(backup => `<div class="backup-item" data-path="${escapeHtml(backup.path)}" data-type="nls">
+          <div class="backup-name">${escapeHtml(backup.name)}</div>
+          <div class="backup-detail">${backup.isOriginal ? '原始备份' : backup.kind === 'before-restore' ? '恢复前快照' : '卸载前快照'} · ${patchStatusText[backup.status.state] ?? backup.status.state}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button id="restoreBackupBtn" disabled>恢复选中备份</button>
+      <button id="deleteBackupBtn" disabled class="secondary">删除选中备份</button>
+      <button class="secondary close-dialog-btn">关闭</button>
+    </div>
+  </dialog>
+
+  <dialog id="directoryDialog">
+    <div class="dialog-header">
+      <h3>选择 Cursor 目录</h3>
+      <button class="secondary close-dialog-btn">✕</button>
+    </div>
+    <div class="dialog-body">
+      <p style="margin-bottom: 16px; color: var(--vscode-descriptionForeground);">请选择识别方式：</p>
+      <button data-command="autoLocate" style="width: 100%; margin-bottom: 10px;" class="close-on-click">自动识别</button>
+      <button data-command="chooseRoot" class="secondary close-on-click" style="width: 100%;">手动选择</button>
+    </div>
+  </dialog>
+
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    let selectedBackup = null;
+    let selectedBackupType = null;
+
+    document.querySelectorAll('button[data-command]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const command = btn.dataset.command;
+        if (command === 'openBackupDialog') {
+          document.getElementById('backupDialog').showModal();
+        } else if (command === 'openDirectoryDialog') {
+          document.getElementById('directoryDialog').showModal();
+        } else {
+          vscode.postMessage({ command });
+          if (btn.classList.contains('close-on-click')) {
+            closeDialog();
+          }
+        }
+      });
+    });
+
+    // 关闭弹窗按钮事件
+    document.querySelectorAll('.close-dialog-btn').forEach(btn => {
+      btn.addEventListener('click', closeDialog);
+    });
+
+    // 点击背景关闭弹窗
+    document.querySelectorAll('dialog').forEach(dialog => {
+      dialog.addEventListener('click', (e) => {
+        if (e.target === dialog) {
+          closeDialog();
+        }
+      });
+    });
+
+    document.querySelectorAll('.backup-item').forEach(item => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.backup-item').forEach(i => i.classList.remove('selected'));
+        item.classList.add('selected');
+        selectedBackup = item.dataset.path;
+        selectedBackupType = item.dataset.type;
+        const restoreBtn = document.getElementById('restoreBackupBtn');
+        const deleteBtn = document.getElementById('deleteBackupBtn');
+        if (restoreBtn) restoreBtn.disabled = false;
+        if (deleteBtn) deleteBtn.disabled = false;
+      });
+    });
+
+    document.getElementById('restoreBackupBtn')?.addEventListener('click', () => {
+      if (!selectedBackup || !selectedBackupType) return;
+      const command = selectedBackupType === 'workbench' ? 'restoreWorkbenchBackup' : 'restoreNlsBackup';
+      vscode.postMessage({ command, backupPath: selectedBackup });
+      closeDialog();
+    });
+
+    document.getElementById('deleteBackupBtn')?.addEventListener('click', () => {
+      if (!selectedBackup || !selectedBackupType) return;
+      const command = selectedBackupType === 'workbench' ? 'deleteWorkbenchBackup' : 'deleteNlsBackup';
+      vscode.postMessage({ command, backupPath: selectedBackup });
+      closeDialog();
+    });
+
+    function closeDialog() {
+      document.querySelectorAll('dialog').forEach(d => d.close());
+      selectedBackup = null;
+      selectedBackupType = null;
+      const restoreBtn = document.getElementById('restoreBackupBtn');
+      const deleteBtn = document.getElementById('deleteBackupBtn');
+      if (restoreBtn) restoreBtn.disabled = true;
+      if (deleteBtn) deleteBtn.disabled = true;
+      document.querySelectorAll('.backup-item').forEach(i => i.classList.remove('selected'));
+    }
+
+    function toggleDetail(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden');
+    }
+
+    document.getElementById('detailToggleBtn')?.addEventListener('click', () => {
+      toggleDetail('detail-info');
+    });
+  </script>
+</body>
+</html>`;
 }

@@ -495,6 +495,18 @@ async function unapplyPatchFromTarget(
   };
 }
 
+export async function deleteWorkbenchBackup(backupPath: string, progress?: ProgressCallback): Promise<void> {
+  await reportProgress(progress, { message: '准备删除备份文件', percent: 0 });
+  
+  try {
+    await fs.unlink(backupPath);
+    await reportProgress(progress, { message: '备份文件已删除', percent: 100 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`删除备份文件失败: ${message}`);
+  }
+}
+
 export async function restoreWorkbenchBackup(root: string, context: vscode.ExtensionContext, backupPath?: string, progress?: ProgressCallback): Promise<PatchRestoreResult> {
   const install = await validateCursorRoot(root, '补丁恢复', createScopedProgress(progress, 0, 8, '校验安装目录'));
   if (!install.valid) {
